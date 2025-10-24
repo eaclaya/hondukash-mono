@@ -1,0 +1,208 @@
+# Docker Compose for ERP System Services
+# Excludes web server (using Laravel Herd for local development)
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: hondukash_postgres
+    environment:
+      POSTGRES_DB: hondukash_erp
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      # Single database for multi-schema multi-tenancy
+    ports:
+      - '${DB_PORT:-5432}:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d
+      - ./claudedocs/database-migration-scripts.sql:/docker-entrypoint-initdb.d/99-tenant-functions.sql
+    networks:
+      - erp_network
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis for Caching and Queues
+  redis:
+    image: redis:7-alpine
+    container_name: hondukash_redis
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - redis_data:/data
+    networks:
+      - erp_network
+    command: redis-server --appendonly yes --requirepass redis_password
+    healthcheck:
+      test: ['CMD', 'redis-cli', '--raw', 'incr', 'ping']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  mailpit:
+    image: axllent/mailpit
+    container_name: hondukash_mailpit
+    restart: unless-stopped
+    ports:
+      - '${MAIL_PORT:-1025}:1025'
+      - '${MAIL_WEB_PORT:-8025}:8025'
+    networks:
+      - erp_network
+
+  # MinIO for S3-compatible object storage
+  minio:
+    image: minio/minio:latest
+    container_name: hondukash_minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+      MINIO_DEFAULT_BUCKETS: erp-uploads,erp-reports,erp-backups
+    ports:
+      - '${MINIO_PORT:-9000}:9000' # API port
+      - '${MINIO_WEB_PORT:-9001}:9001' # Console port
+    volumes:
+      - minio_data:/data
+    networks:
+      - erp_network
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # Create MinIO buckets
+  minio-init:
+    image: minio/mc:latest
+    container_name: hondukash_minio_init
+    depends_on:
+      - minio
+    networks:
+      - erp_network
+    entrypoint: >
+      /bin/sh -c "
+      sleep 10;
+      /usr/bin/mc config host add minio http://minio:9000 minioadmin minioadmin123;
+      /usr/bin/mc mb minio/erp-uploads;
+      /usr/bin/mc mb minio/erp-reports;
+      /usr/bin/mc mb minio/erp-backups;
+      /usr/bin/mc policy download minio/erp-uploads;
+      /usr/bin/mc policy download minio/erp-reports;
+      exit 0;
+      "
+
+  # Elasticsearch for search functionality (optional)
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.8.0
+    container_name: hondukash_elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - 'ES_JAVA_OPTS=-Xms512m -Xmx512m'
+    ports:
+      - '9200:9200'
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - erp_network
+    profiles:
+      - search # Optional profile for search features
+
+  # Kibana for Elasticsearch (optional)
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.8.0
+    container_name: hondukash_kibana
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - '${KIBANA_PORT:-5601}:5601'
+    depends_on:
+      - elasticsearch
+    networks:
+      - erp_network
+    profiles:
+      - search # Optional profile for search features
+
+  # Database backup service
+  db-backup:
+    image: postgres:15-alpine
+    container_name: hondukash_db_backup
+    depends_on:
+      - postgres
+    environment:
+      PGPASSWORD: postgres
+    volumes:
+      - ./backups:/backups
+      - ./docker/scripts:/scripts
+    networks:
+      - erp_network
+    command: >
+      sh -c "
+      while true; do
+        echo 'Creating backup...'
+        pg_dump -h postgres -U postgres -d hondukash_erp --schema-only > /backups/schema_backup_$$(date +%Y%m%d_%H%M%S).sql
+        pg_dump -h postgres -U postgres -d hondukash_erp > /backups/full_backup_$$(date +%Y%m%d_%H%M%S).sql
+        echo 'Backup created successfully'
+        find /backups -name '*.sql' -mtime +7 -delete
+        sleep 86400
+      done
+      "
+    profiles:
+      - backup # Optional profile for automated backups
+
+  # Prometheus for monitoring (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: hondukash_prometheus
+    ports:
+      - '${PROMETHEUS_PORT:-9090}:9090'
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - erp_network
+    profiles:
+      - monitoring # Optional profile for monitoring
+
+  # Grafana for visualization (optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: hondukash_grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin123
+    ports:
+      - '${GRAFANA_PORT:-3000}:3000'
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./docker/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    networks:
+      - erp_network
+    profiles:
+      - monitoring # Optional profile for monitoring
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  minio_data:
+    driver: local
+  elasticsearch_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  erp_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16
