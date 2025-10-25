@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 use Stancl\Tenancy\Database\Models\Domain;
-use Stancl\Tenancy\Database\Models\Tenant;
+use App\Models\Tenant;
 
 return [
     'tenant_model' => Tenant::class,
@@ -47,6 +47,20 @@ return [
          * Note: don't name your template connection tenant. That name is reserved by package.
          */
         'template_tenant_connection' => null,
+
+        /**
+         * Tenant database managers are classes that handle the creation, deletion, and migration of tenant databases.
+         */
+        'managers' => [
+            'pgsql' => Stancl\Tenancy\TenantDatabaseManagers\PostgreSQLSchemaManager::class,
+        ],
+
+        /**
+         * Tenant database names are created like this:
+         * prefix + tenant_id + suffix.
+         */
+        'prefix' => 'tenant_',
+        'suffix' => '',
 
         /**
          * Tenant database names are created like this:
