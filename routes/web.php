@@ -2,18 +2,32 @@
 
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
-use Laravel\Fortify\Features;
 
-Route::get('/', function () {
-    return Inertia::render('welcome', [
-        'canRegister' => Features::enabled(Features::registration()),
-    ]);
-})->name('home');
+/*
+|--------------------------------------------------------------------------
+| Central Domain Routes
+|--------------------------------------------------------------------------
+|
+| These routes are for the central/landlord domain functionality.
+| They handle the main application and admin access.
+|
+*/
 
-Route::middleware(['auth', 'verified'])->group(function () {
-    Route::get('dashboard', function () {
-        return Inertia::render('dashboard');
-    })->name('dashboard');
+// Central domain routes (for landlord/admin access)
+Route::domain(config('tenancy.central_domains.0', 'localhost'))->group(function () {
+    Route::get('/', function () {
+        return Inertia::render('welcome', [
+            'canLogin' => true,
+            'adminUrl' => url('/admin'),
+        ]);
+    })->name('home');
 });
 
-require __DIR__.'/settings.php';
+// Default application routes (used by tenant routes when included)
+Route::middleware(['auth:web'])->group(function () {
+    Route::get('dashboard', function () {
+        return Inertia::render('dashboard', [
+            'user' => auth('web')->user(),
+        ]);
+    })->name('dashboard');
+});
