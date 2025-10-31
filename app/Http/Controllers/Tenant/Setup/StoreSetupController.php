@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Tenant\Setup;
 
 use App\Http\Controllers\Controller;
-use App\Models\Store;
+use App\Models\Tenant\Store;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -30,8 +30,8 @@ class StoreSetupController extends Controller
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
-            'code' => 'required|string|max:10|unique:stores,code',
-            'description' => 'nullable|string|max:1000',
+            'code' => 'required|string|max:50|unique:stores,code',
+            'type' => ['required', Rule::in(['store', 'warehouse'])],
             'email' => 'nullable|email|max:255',
             'phone' => 'nullable|string|max:20',
             'address' => 'nullable|string|max:500',
@@ -42,17 +42,42 @@ class StoreSetupController extends Controller
             'tax_rate' => 'nullable|numeric|min:0|max:1',
             'currency' => ['required', 'string', 'max:3', Rule::in(array_keys($this->getSupportedCurrencies()))],
             'timezone' => ['required', 'string', Rule::in(array_keys($this->getSupportedTimezones()))],
-            'business_hours' => 'nullable|array',
-            'business_hours.*.is_open' => 'boolean',
-            'business_hours.*.open' => 'nullable|required_if:business_hours.*.is_open,true|date_format:H:i',
-            'business_hours.*.close' => 'nullable|required_if:business_hours.*.is_open,true|date_format:H:i|after:business_hours.*.open',
         ]);
 
-        // Create the first store as default
+        // Prepare address JSON
+        $address = [
+            'street' => $validated['address'] ?? null,
+            'city' => $validated['city'] ?? null,
+            'state' => $validated['state'] ?? null,
+            'country' => $validated['country'] ?? null,
+            'postal_code' => $validated['postal_code'] ?? null,
+        ];
+
+        // Prepare settings JSON
+        $settings = [
+            'tax_rate' => $validated['tax_rate'] ?? 0.15,
+            'currency' => $validated['currency'],
+            'timezone' => $validated['timezone'],
+            'email' => $validated['email'] ?? null,
+            'phone' => $validated['phone'] ?? null,
+            'is_default' => true, // First store is default
+        ];
+
+        // Create the store
         $store = Store::create([
-            ...$validated,
-            'is_default' => true,
+            'name' => $validated['name'],
+            'code' => $validated['code'],
+            'type' => $validated['type'],
+            'address' => $address,
+            'settings' => $settings,
             'is_active' => true,
+        ]);
+
+        \Log::info('Store created successfully', [
+            'store_id' => $store->id,
+            'store_name' => $store->name,
+            'tenant_id' => tenant()?->id,
+            'redirect_to' => route('setup.accounting.index')
         ]);
 
         return redirect()->route('setup.accounting.index')->with('success', 'Store created successfully! Now let\'s configure your accounting settings.');

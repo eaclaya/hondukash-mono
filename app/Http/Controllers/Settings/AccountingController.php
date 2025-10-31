@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers\Tenant\Setup;
+namespace App\Http\Controllers\Settings;
 
 use App\Http\Controllers\Controller;
 use App\Models\Tenant\AccountingConfiguration;
@@ -8,22 +8,17 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 
-class AccountingSetupController extends Controller
+class AccountingController extends Controller
 {
     /**
-     * Show the accounting setup wizard.
+     * Display the accounting configuration settings.
      */
     public function index()
     {
-        \Log::info('AccountingSetupController@index called', [
-            'tenant_id' => tenant()?->id,
-            'user_id' => auth('web')->id(),
-            'stores_count' => \App\Models\Tenant\Store::count(),
-        ]);
-
-        return Inertia::render('tenant/setup/accounting', [
-            'tenant' => tenant(),
-            'defaultChartOfAccounts' => AccountingConfiguration::getDefaultChartOfAccounts(),
+        $accountingConfig = AccountingConfiguration::first();
+        
+        return Inertia::render('settings/accounting', [
+            'accountingConfig' => $accountingConfig,
             'currencies' => $this->getSupportedCurrencies(),
             'accountingMethods' => $this->getAccountingMethods(),
             'legalForms' => $this->getLegalForms(),
@@ -31,10 +26,16 @@ class AccountingSetupController extends Controller
     }
 
     /**
-     * Store the accounting configuration.
+     * Update the accounting configuration.
      */
-    public function store(Request $request)
+    public function update(Request $request)
     {
+        $accountingConfig = AccountingConfiguration::first();
+        
+        if (!$accountingConfig) {
+            return redirect()->back()->withErrors(['error' => 'Accounting configuration not found. Please run the setup wizard first.']);
+        }
+
         $validated = $request->validate([
             'company_name' => 'required|string|max:255',
             'company_registration' => 'nullable|string|max:50',
@@ -56,21 +57,9 @@ class AccountingSetupController extends Controller
             'receipt_numbering_pattern' => 'required|string|max:50',
         ]);
 
-        // Set up default chart of accounts
-        $validated['chart_of_accounts'] = AccountingConfiguration::getDefaultChartOfAccounts();
-        $validated['account_numbering_scheme'] = [
-            'asset_start' => 1000,
-            'liability_start' => 2000,
-            'equity_start' => 3000,
-            'revenue_start' => 4000,
-            'expense_start' => 5000,
-        ];
+        $accountingConfig->update($validated);
 
-        // Create accounting configuration
-        $accountingConfig = AccountingConfiguration::create($validated);
-        $accountingConfig->markAsConfigured();
-
-        return redirect('/dashboard')->with('success', 'Accounting configuration completed! Your system is now ready to use.');
+        return redirect()->back()->with('success', 'Accounting configuration updated successfully.');
     }
 
     /**

@@ -3,6 +3,9 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Tenant\AuthController;
+use App\Http\Controllers\Tenant\Setup\StoreSetupController;
+use App\Http\Controllers\Tenant\Setup\AccountingSetupController;
+use App\Http\Middleware\RequireAccountingSetup;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use Stancl\Tenancy\Middleware\InitializeTenancyByDomain;
@@ -35,8 +38,17 @@ Route::middleware([
         Route::post('/register', [AuthController::class, 'register']);
     });
 
-    // Tenant Authenticated Routes
-    Route::middleware('auth:web')->group(function () {
+    // Setup Wizard Routes (authenticated but no accounting setup required)
+    Route::middleware('auth:web')->prefix('setup')->name('setup.')->group(function () {
+        Route::get('/store', [StoreSetupController::class, 'index'])->name('store.index');
+        Route::post('/store', [StoreSetupController::class, 'store'])->name('store.store');
+        
+        Route::get('/accounting', [AccountingSetupController::class, 'index'])->name('accounting.index');
+        Route::post('/accounting', [AccountingSetupController::class, 'store'])->name('accounting.store');
+    });
+
+    // Tenant Authenticated Routes (with accounting setup requirement)
+    Route::middleware(['auth:web', RequireAccountingSetup::class])->group(function () {
         Route::post('/logout', [AuthController::class, 'logout'])->name('tenant.logout');
         
         Route::get('/dashboard', function () {
